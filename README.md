@@ -1,6 +1,6 @@
 # XLA Compiler Optimizations with RL
 
-This repo is the final project of Erik Wilson, Rayaan Farqui, and Ahyush Kaul for CS 521 ML Compilers at UIUC MCS program. Our project is to implement RL for finding optimal XLA compiler pass ordering.
+This repo is the final project of Erik Wilson, Rayaan Faruqi, and Ahyush Kaul for CS 521 ML Compilers at UIUC MCS program. Our project is to implement RL for finding optimal XLA compiler pass ordering.
 
 ## HLO IR Feature Extraction
 
