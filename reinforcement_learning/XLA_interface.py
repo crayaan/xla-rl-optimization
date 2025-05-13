@@ -95,19 +95,18 @@ class XLAInterface:
         output_file = os.path.join(self.optimized_dir, output_filename)
         
         # Build the command to run the pass:
-        cmd = [
-            self.hlo_opt_path,
-            "--passes=" + pass_name,
-            hlo_file,
-            "-o", output_file
-            ]
+        # Based on the error message, hlo-opt doesn't like the -o flag
+        # Instead we'll use shell redirection (>) to save the output
+        cmd = f"{self.hlo_opt_path} --passes={pass_name} {hlo_file} > {output_file}"
 
         if self.verbose:
-            print(f"Running command: {' '.join(cmd)}")
+            print(f"Running command: {cmd}")
         
         try:
+            # Use shell=True to enable output redirection
             result = subprocess.run(
                 cmd,
+                shell=True,
                 cwd=self.xla_dir,
                 capture_output=True,
                 text=True,
@@ -118,7 +117,12 @@ class XLAInterface:
                 print(f"Pass {pass_name} successfully applied")
                 print(f"Output saved to: {output_file}")
             
-            return True, output_file
+            # Make sure the output file was actually created and has content
+            if os.path.exists(output_file) and os.path.getsize(output_file) > 0:
+                return True, output_file
+            else:
+                print("Output file was not created or is empty")
+                return False, None
         
         except subprocess.CalledProcessError as e:
             print(f"Error applying pass {pass_name}: {e.stderr}")
