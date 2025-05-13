@@ -1,0 +1,12 @@
+{
+  "python.analysis.exclude": ["../xla"],
+  "python.analysis.ignore": ["../xla"],
+  "python.linting.pylintEnabled": true,
+  "python.linting.enabled": true,
+  "python.analysis.diagnosticMode": "workspace",
+  "python.analysis.typeCheckingMode": "basic",
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.importFormat": "absolute",
+  "python.analysis.inlayHints.variableTypes": true,
+  "python.analysis.inlayHints.functionReturnTypes": true
+} 

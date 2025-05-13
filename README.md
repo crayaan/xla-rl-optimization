@@ -125,3 +125,249 @@ Let's assume this is an example feature vector for now:
 "mixed_precision": 1
 }
 ```
+
+## XLA Compiler Setup
+
+This section provides instructions for building and using the XLA compiler with this project. These steps are crucial for running the reinforcement learning environment that optimizes compiler pass ordering.
+
+### Prerequisites
+
+- Python 3.8+ (with venv or conda)
+- Bazel 6.x (we use bazelisk to manage versions)
+- Git
+- A C++ compiler (Clang recommended for macOS)
+- At least 16GB of RAM and 20GB of disk space for the build
+
+### Building XLA from Source
+
+1. Clone the XLA repository next to this repository:
+   ```bash
+   cd ..
+   git clone https://github.com/openxla/xla.git
+   cd xla
+   ```
+
+2. Configure the build for macOS:
+   ```bash
+   # Create a .bazelrc file with macOS configuration
+   cat > .bazelrc << EOF
+   build --apple_platform_type=macos
+   build --apple_crosstool_top=@local_config_apple_cc//:toolchain
+   build --crosstool_top=@local_config_apple_cc//:toolchain
+   build --host_crosstool_top=@local_config_apple_cc//:toolchain
+   build --copt=-DGRPC_BAZEL_BUILD
+   build --features=archive_param_file
+   build --copt=-w
+   build --define=PREFIX=/usr
+   build --define=LIBDIR=\$(PREFIX)/lib
+   build --define=INCLUDEDIR=\$(PREFIX)/include
+   build --define=PROTOBUF_INCLUDE_PATH=\$(PREFIX)/include
+   build --cxxopt=-std=c++17
+   build --host_cxxopt=-std=c++17
+   build --macos_minimum_os=12.3
+   build --macos_sdk_version=12.3
+   build --cpu=darwin_x86_64
+   build --host_cpu=darwin_x86_64
+   build --noenable_bzlmod
+   EOF
+   ```
+
+3. Build the hlo-opt tool:
+   ```bash
+   # Build the lightweight version for hardware-independent passes
+   bazelisk build -c opt //xla/hlo/tools:hlo-opt
+   
+   # Or build the full version with platform-specific passes (CPU, GPU, etc.)
+   bazelisk build -c opt --config=[CPU|GPU] //xla/tools:hlo-opt
+   ```
+
+4. Verify the built tool:
+   ```bash
+   # List all available passes
+   ./bazel-bin/xla/hlo/tools/hlo-opt --list-passes
+   ```
+
+### Integrating XLA with Reinforcement Learning
+
+The `xla_interface.py` script in the reinforcement learning directory provides an interface between the XLA compiler and our RL environment. It handles:
+
+1. Running optimization passes on HLO graphs
+2. Extracting features from optimized HLO
+3. Computing metrics to evaluate optimization quality
+
+To use the RL environment with XLA:
+
+1. Make sure your environment has access to the XLA build directory
+2. Use the `xla_opt_env.py` environment with the `--xla_dir` parameter pointing to your XLA build
+3. Passes are applied using the names as defined in the XLA compiler
+
+Example:
+```bash
+# Train the RL agent with XLA passes
+python reinforcement_learning/train_agent.py --xla_dir=../xla
+```
+
+### Using the hlo-opt Tool
+
+The hlo-opt tool allows you to:
+
+1. Apply individual passes to HLO files:
+   ```bash
+   ./bazel-bin/xla/hlo/tools/hlo-opt --passes=algebraic_simplifier input.hlo -o output.hlo
+   ```
+
+2. Apply multiple passes in sequence:
+   ```bash
+   ./bazel-bin/xla/hlo/tools/hlo-opt --passes=hlo_dce,algebraic_simplifier,cse input.hlo -o output.hlo
+   ```
+
+3. Convert between HLO formats:
+   ```bash
+   # Convert HLO text to proto
+   ./bazel-bin/xla/hlo/tools/hlo-opt --emit-proto input.hlo -o output.pb
+   
+   # Convert proto to text
+   ./bazel-bin/xla/hlo/tools/hlo-opt input.pbtxt -o output.hlo
+   ```
+
+### Available Optimization Passes
+
+Below is a subset of key optimization passes available through hlo-opt:
+
+1. **Core Simplifiers**:
+   - `algebraic_simplifier` - Performs algebraic simplifications
+   - `hlo_dce` - Dead code elimination
+   - `cse` - Common subexpression elimination
+   - `zero_sized_hlo_elimination` - Removes zero-sized operations
+
+2. **Transformation Passes**:
+   - `bfloat16_propagation` - Numerical precision optimization
+   - `memory_space_propagation` - Memory optimization
+   - `flatten_call_graph` - Flattens the call hierarchy
+
+3. **Structure Passes**:
+   - `tuple_simplifier` - Simplifies tuple operations
+   - `reshape_mover` - Optimizes placement of reshape operations
+   - `tree_reduction_rewriter` - Optimizes reductions
+   - `defuser` - Performs defusion of operations
+
+To get a complete list of available passes, run:
+```bash
+./bazel-bin/xla/hlo/tools/hlo-opt --list-passes
+```
+
+## Reinforcement Learning Environment
+
+The RL environment in this project learns to find optimal compiler pass orderings by:
+
+1. Treating compiler optimization as a sequential decision problem
+2. Taking actions (applying optimization passes) on HLO IR
+3. Measuring the quality of optimizations through defined metrics
+4. Learning which sequences of passes lead to the best optimization outcomes
+
+### Environment Setup
+
+The environment is defined in `reinforcement_learning/xla_opt_env.py` and implements the standard Gym interface:
+
+```python
+class XLAOptimizationEnv(gym.Env):
+    def __init__(
+            self,
+            hlo_features: np.ndarray,
+            available_passes: List[str],
+            max_sequence_length: int = 10,
+            verbose: bool = False,
+            hlo_file_path: str = None
+    ):
+        # ...
+```
+
+Key components:
+- **State**: The current HLO IR features vector
+- **Actions**: Available compiler optimization passes
+- **Rewards**: Improvement in code quality metrics (e.g., operation count reduction, memory usage reduction)
+- **Terminal State**: Reached after applying a fixed number of optimization passes
+
+### RL Agent
+
+We implement a simple Q-learning agent in `reinforcement_learning/simple_agent.py`:
+
+```python
+class SimpleQLearningAgent:
+    def __init__(
+            self,
+            action_space_size: int, 
+            learning_rate: float = 0.1,
+            discount_factor: float = 0.99,
+            exploration_rate: float = 1.0,
+            exploration_decay: float = 0.995,
+            min_exploration_rate: float = 0.01
+    ):
+        # ...
+```
+
+The agent:
+- Uses a tabular Q-learning approach with discretized state space
+- Balances exploration and exploitation with an epsilon-greedy policy
+- Tracks the best optimization sequences found during training
+
+### Training Process
+
+The training loop in `reinforcement_learning/train_agent.py` manages the RL workflow:
+
+1. For each episode:
+   - Reset the environment with a fresh HLO module
+   - The agent selects and applies optimization passes sequentially
+   - After each step, the environment returns the new state and reward
+   - The agent updates its Q-values based on the rewards
+   - Exploration rate decays over time to focus on exploitation
+
+2. After training:
+   - The best sequence of passes is identified
+   - Performance metrics are plotted
+   - The trained agent can be used for new HLO modules
+
+### XLA Integration
+
+The `xla_interface.py` module bridges the gap between the RL environment and XLA compiler:
+
+```python
+class XLAInterface:
+    def __init__(self, xla_dir: str = None, verbose: bool = False):
+        # ...
+        
+    def apply_pass(self, hlo_file: str, pass_name: str) -> Tuple[bool, Optional[str]]:
+        # ...
+        
+    def extract_features(self, hlo_file: str) -> np.ndarray:
+        # ...
+```
+
+This interface:
+- Manages HLO file I/O
+- Calls the hlo-opt tool to apply compiler passes on HLO modules
+- Extracts feature vectors from optimized HLO files
+- Computes metrics to determine the rewards for the RL agent
+
+## Running the Project
+
+To run the complete RL optimization pipeline:
+
+1. Build XLA as described in the "XLA Compiler Setup" section
+2. Prepare HLO IR files in the `jax_hlo/hlo_data/` directory
+3. Train the RL agent:
+
+```bash
+cd reinforcement_learning
+python train_agent.py
+```
+
+4. Analyze the results in the generated plots and logs
+
+
+## Future Directions
+
+- Implement more sophisticated RL algorithms (DQN, PPO)
+- Add more compiler metrics for multi-objective optimization
+- Support for multi-device targets (CPU/GPU/TPU)
+- Integration with JAX for end-to-end optimization
