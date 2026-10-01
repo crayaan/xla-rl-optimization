@@ -24,3 +24,5 @@ venv.bak/
 .cursor/
 *.swp
 *.swo
+.dirac/
+.dirac-cache/
